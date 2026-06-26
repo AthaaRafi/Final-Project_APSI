@@ -1,0 +1,493 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Enums
+// ============================================================
+
+enum Role {
+  PENGGUNA
+  PJ_RUANG
+  LABORAN
+  INVENTARIS
+  PIMPINAN
+}
+
+enum StatusUser {
+  PENDING_VERIFICATION
+  ACTIVE
+  INACTIVE
+}
+
+enum TipeRuangan {
+  KELAS
+  LABORATORIUM
+}
+
+enum Kondisi {
+  BAIK
+  RUSAK_RINGAN
+  RUSAK_BERAT
+}
+
+enum StatusBarang {
+  NORMAL
+  DILAPORKAN_RUSAK
+  MENUNGGU_VALIDASI
+  DALAM_PERAWATAN
+  TERJADWAL_PERAWATAN
+  HILANG
+  DIAJUKAN_HAPUS
+  NONAKTIF
+}
+
+enum FlagVerifikasi {
+  BELUM
+  TERVERIFIKASI
+  ANOMALI
+}
+
+enum JenisPengajuan {
+  PEMINDAHAN
+  PEMELIHARAAN
+  KERUSAKAN
+  PENGHAPUSAN
+}
+
+enum StatusPengajuan {
+  MENUNGGU
+  DISETUJUI
+  DITOLAK
+  REVISI
+  SELESAI
+  LANGSUNG_TERCATAT
+  DIBATALKAN
+}
+
+enum StatusOpname {
+  AKTIF
+  SELESAI
+  BATAL
+}
+
+enum StatusMatching {
+  COCOK
+  TIDAK_COCOK
+  TIDAK_TERDAFTAR
+}
+
+enum TipeQr {
+  BARANG
+  RUANGAN
+}
+
+enum SumberPenghapusan {
+  LAPORAN_KERUSAKAN
+  STOCK_OPNAME
+  MANUAL
+}
+
+enum TipeNotifikasi {
+  PENGAJUAN_DISETUJUI
+  PENGAJUAN_DITOLAK
+  PENGAJUAN_SELESAI
+  PENGAJUAN_REVISI
+  PENGAJUAN_DIBATALKAN
+  LAPORAN_BARU
+  LAPORAN_DIPROSES
+  LAPORAN_DITOLAK
+  LAPORAN_SELESAI
+  PENGAJUAN_BARU
+  PENGHAPUSAN_BARU
+  MAINTENANCE_JATUH_TEMPO
+}
+
+// ============================================================
+// Auth & Pengguna
+// ============================================================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String
+  nama            String
+  role            Role      @default(PENGGUNA)
+  status          StatusUser @default(PENDING_VERIFICATION)
+  emailVerifiedAt DateTime?
+
+  areas           UserRuangan[]
+  pengajuan       Pengajuan[] @relation("Pengaju")
+  sesiScan        StockOpname[]
+  notifikasi      Notifikasi[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("user")
+}
+
+model UserRuangan {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  ruanganId String
+  ruangan   Ruangan  @relation(fields: [ruanganId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, ruanganId])
+  @@map("user_ruangan")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@map("email_verification_token")
+}
+
+model PasswordResetOtp {
+  id        String    @id @default(cuid())
+  userId    String
+  otp       String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@map("password_reset_otp")
+}
+
+model LoginAttempt {
+  id          String   @id @default(cuid())
+  email       String
+  ipAddress   String?
+  success     Boolean  @default(false)
+  attemptedAt DateTime @default(now())
+
+  @@index([email, attemptedAt])
+  @@map("login_attempt")
+}
+
+// ============================================================
+// Lokasi
+// ============================================================
+
+model Gedung {
+  id      String    @id @default(cuid())
+  kode    String    @unique
+  nama    String
+  ruangan Ruangan[]
+
+  @@map("gedung")
+}
+
+model Ruangan {
+  id          String      @id @default(cuid())
+  kodeRuangan String      @unique @map("kode_ruangan")
+  namaRuangan String      @map("nama_ruangan")
+  tipe        TipeRuangan @default(KELAS)
+  lantai      Int?
+  gedungId    String
+  gedung      Gedung      @relation(fields: [gedungId], references: [id])
+
+  penanggungJawab UserRuangan[]
+  barangTerdaftar Barang[]        @relation("BarangLokasiTerdaftar")
+  barangAktual    Barang[]        @relation("BarangLokasiAktual")
+  sesiScan        StockOpname[]
+  qr              QrCode[]
+  stockOpnameDetail StockOpnameDetail[]
+  logCetakLabel   LogCetakLabel[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ruangan")
+}
+
+// ============================================================
+// Master Barang
+// ============================================================
+
+model JenisBarang {
+  id     String   @id @default(cuid())
+  kode   String   @unique
+  nama   String
+  barang Barang[]
+
+  @@map("jenis_barang")
+}
+
+model KategoriApproval {
+  id            String   @id @default(cuid())
+  nama          String
+  wajibApproval Boolean  @default(false)
+  deskripsi     String?
+  barang        Barang[]
+
+  @@map("kategori_approval")
+}
+
+model Barang {
+  id         String @id @default(cuid())
+  kodeBarang String @unique
+  namaBarang String
+
+  jenisId String
+  jenis   JenisBarang @relation(fields: [jenisId], references: [id])
+
+  tahunPembelian Int
+  nomorUrut      Int
+
+  lokasiTerdaftarId String
+  lokasiTerdaftar   Ruangan @relation("BarangLokasiTerdaftar", fields: [lokasiTerdaftarId], references: [id])
+
+  lokasiAktualId String
+  lokasiAktual   Ruangan @relation("BarangLokasiAktual", fields: [lokasiAktualId], references: [id])
+
+  kondisi        Kondisi        @default(BAIK)
+  statusBarang   StatusBarang   @default(NORMAL)
+  flagVerifikasi FlagVerifikasi @default(BELUM)
+
+  kategoriApprovalId String
+  kategoriApproval   KategoriApproval @relation(fields: [kategoriApprovalId], references: [id])
+
+  penguasaan String
+  fotoPath   String?
+
+  qr        QrCode[]
+  pengajuan Pengajuan[]
+  riwayat   RiwayatBarang[]
+  stockOpnameDetail StockOpnameDetail[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+  deletedBy String?
+
+  @@index([lokasiAktualId])
+  @@index([lokasiTerdaftarId])
+  @@index([statusBarang])
+  @@map("barang")
+}
+
+model QrCode {
+  id        String   @id @default(cuid())
+  tipe      TipeQr   @default(BARANG)
+  barangId  String?
+  barang    Barang?  @relation(fields: [barangId], references: [id])
+  ruanganId String?
+  ruangan   Ruangan? @relation(fields: [ruanganId], references: [id])
+  payload   String   @db.TinyText
+  aktif     Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([barangId])
+  @@index([ruanganId])
+  @@map("qr_code")
+}
+
+// ============================================================
+// Pengajuan & Riwayat
+// ============================================================
+
+model Pengajuan {
+  id       String         @id @default(cuid())
+  nomor    String         @unique
+  jenis    JenisPengajuan
+
+  barangId String
+  barang   Barang @relation(fields: [barangId], references: [id])
+
+  pengajuId String
+  pengaju   User   @relation("Pengaju", fields: [pengajuId], references: [id])
+
+  lokasiAsalId   String?
+  lokasiTujuanId String?
+
+  isAntarArea      Boolean @default(false)
+  approvalAsalBy   String?
+  approvalTujuanBy String?
+
+  alasan String @db.Text
+
+  sumber      SumberPenghapusan?
+  sumberRefId String?
+
+  status       StatusPengajuan @default(MENUNGGU)
+  catatanAdmin String?         @db.Text
+
+  lampiran Lampiran[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("pengajuan")
+}
+
+model RiwayatBarang {
+  id        String   @id @default(cuid())
+  barangId  String
+  barang    Barang   @relation(fields: [barangId], references: [id])
+  aktivitas String   @db.Text
+  aktor     String
+  waktu     DateTime @default(now())
+
+  @@index([barangId])
+  @@map("riwayat_barang")
+}
+
+model Lampiran {
+  id          String  @id @default(cuid())
+  path        String
+  tipe        String
+  barangId    String?
+  pengajuanId String?
+  pengajuan   Pengajuan? @relation(fields: [pengajuanId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@map("lampiran")
+}
+
+// ============================================================
+// Stock Opname
+// ============================================================
+
+model StockOpname {
+  id            String       @id @default(cuid())
+  nomor         Int          @unique @default(autoincrement())
+  tahunAnggaran Int          @default(0)
+
+  ruanganId String
+  ruangan   Ruangan @relation(fields: [ruanganId], references: [id])
+
+  adminId String
+  admin   User   @relation(fields: [adminId], references: [id])
+
+  tanggalScan  DateTime  @default(now())
+  waktuSelesai DateTime?
+  status       StatusOpname @default(AKTIF)
+
+  jumlahBarangScan     Int @default(0)
+  jumlahCocok          Int @default(0)
+  jumlahTidakCocok     Int @default(0)
+  jumlahTidakTerdaftar Int @default(0)
+  jumlahHilang         Int @default(0)
+
+  catatan String? @db.Text
+
+  detail StockOpnameDetail[]
+
+  @@map("stock_opname")
+}
+
+model StockOpnameDetail {
+  id       String      @id @default(cuid())
+  opnameId String
+  opname   StockOpname @relation(fields: [opnameId], references: [id])
+
+  kodeBarangScan String
+  barangId       String?
+  barang         Barang? @relation(fields: [barangId], references: [id])
+  statusMatching StatusMatching
+  keterangan     String? @db.Text
+
+  ruanganAktualId String?
+  ruanganAktual   Ruangan? @relation(fields: [ruanganAktualId], references: [id])
+
+  kondisi   Kondisi?
+  fotoPath  String?
+  waktuScan DateTime @default(now())
+
+  @@index([opnameId])
+  @@map("stock_opname_detail")
+}
+
+// ============================================================
+// Label & Cetak
+// ============================================================
+
+model KonfigurasiLabel {
+  id            String @id @default(cuid())
+  ukuranPanjang Float  @default(6)
+  ukuranLebar   Float  @default(2.5)
+  jumlahPerA4   Int    @default(10)
+  layoutKolom   Int    @default(2)
+  fontKode      String @default("Arial Bold 8pt")
+  fontNama      String @default("Arial 6pt")
+  logoPath      String?
+
+  @@map("konfigurasi_label")
+}
+
+model LogCetakLabel {
+  id          String   @id @default(cuid())
+  ruanganId   String
+  ruangan     Ruangan  @relation(fields: [ruanganId], references: [id])
+  adminId     String
+  tanggal     DateTime @default(now())
+  jumlahLabel Int
+  status      String
+
+  @@map("log_cetak_label")
+}
+
+// ============================================================
+// Audit & Notifikasi
+// ============================================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  aktor     String
+  aksi      String
+  entitas   String
+  entitasId String?
+  detail    String?  @db.Text
+  waktu     DateTime @default(now())
+
+  @@index([entitas, entitasId])
+  @@map("audit_log")
+}
+
+model JadwalMaintenance {
+  id            String    @id @default(cuid())
+  jenisId       String?
+  barangId      String?
+  intervalBulan Int
+  nextDueDate   DateTime?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("jadwal_maintenance")
+}
+
+model Notifikasi {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id])
+  tipe        TipeNotifikasi
+  pesan       String         @db.Text
+  pengajuanId String?
+  laporanId   String?
+  barangId    String?
+  dibaca      Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+
+  @@index([userId, dibaca])
+  @@map("notifikasi")
+}
